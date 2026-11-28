@@ -1,1347 +1,651 @@
 
-
-import { useEffect, useState, type FormEvent } from "react";
-
+import { useEffect, useState } from "react";
 import "./App.css";
 
-const API_BASE_URL = "http://127.0.0.1:8000";
+import Login from "./components/Login";
+import Register from "./components/Register";
 
+import Header from "./components/layout/Header";
+import Sidebar from "./components/layout/Sidebar";
 
+import AllIssuesPage from "./pages/AllIssuesPage";
+import DashboardPage from "./pages/DashboardPage";
+import SubmitIssuePage from "./pages/SubmitIssuePage";
+import UserManagementPage from "./pages/UserManagementPage";
 
-type Priority = "High" | "Medium" | "Low";
+import { API_BASE_URL } from "./services/api";
 
-type IssueStatus = "Open" | "In Progress" | "Resolved";
+import type { Issue, IssueStatus } from "./types/issue";
+import type { User } from "./types/user";
 
+import { mapApiIssues } from "./utils/issueUtils";
 
+type ActivePage =
+  | "dashboard"
+  | "all-issues"
+  | "submit-issue"
+  | "user-management";
 
-type Issue = {
+type AuthPage = "login" | "register";
 
-  id: string;
-
-  title: string;
-
-  category: string;
-
-  description: string;
-
-  location: string;
-
-  date: string;
-
-  priority: Priority;
-
-  status: IssueStatus;
-
-};
-
-
-
-type IssueFormData = {
-
-  title: string;
-
-  category: string;
-
-  description: string;
-
-  location: string;
-
-  priority: Priority;
-
-};
-
-
-
-const emptyForm: IssueFormData = {
-
-  title: "",
-
-  category: "IT & Equipment",
-
-  description: "",
-
-  location: "",
-
-  priority: "Medium",
-
-};
-
-
-
-const initialStats = {
-
-  total: 128,
-
-  open: 24,
-
-  inProgress: 18,
-
-  resolved: 86,
-
-};
-
-
+function readSavedUser(): User | null {
+  try {
+    const savedUser = localStorage.getItem("user");
+    return savedUser ? JSON.parse(savedUser) : null;
+  } catch {
+    return null;
+  }
+}
 
 function App() {
+  // AUTHENTICATION
 
-  const [allIssues, setAllIssues] = useState<Issue[]>([]);
+  const [token, setToken] = useState<string | null>(
+    () => localStorage.getItem("access_token")
+  );
 
-  const [formData, setFormData] = useState<IssueFormData>(emptyForm);
+  const [currentUser, setCurrentUser] = useState<User | null>(
+    readSavedUser
+  );
+
+  const [authPage, setAuthPage] = useState<AuthPage>("login");
+
+  const [isAuthChecking, setIsAuthChecking] = useState(
+    () => Boolean(localStorage.getItem("access_token"))
+  );
+
+  const [authError, setAuthError] = useState("");
+
+  const userRole = currentUser?.role ?? null;
+
+  // APPLICATION STATE
+
+  const [activePage, setActivePage] =
+    useState<ActivePage>("dashboard");
+
+  const [issues, setIssues] = useState<Issue[]>([]);
+
+  const [staffUsers, setStaffUsers] = useState<User[]>([]);
+
+  const [isLoading, setIsLoading] = useState(false);
 
   const [successMessage, setSuccessMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
-  const [isLoading, setIsLoading] = useState(true);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [newIssueCount, setNewIssueCount] = useState(0);
 
-  const [selectedIssue, setSelectedIssue] = useState<Issue | null>(null);
+  // LOGOUT
 
+  function handleLogout() {
+    localStorage.removeItem("access_token");
+    localStorage.removeItem("user_role");
+    localStorage.removeItem("user");
 
+    setToken(null);
+    setCurrentUser(null);
+    setIssues([]);
+    setStaffUsers([]);
 
+    setActivePage("dashboard");
+    setAuthPage("login");
 
+    setIsAuthChecking(false);
+    setAuthError("");
 
-  function formatIssueDate(value: string): string {
-    const parsedDate = new Date(value);
-    if (Number.isNaN(parsedDate.getTime())) return value;
-    return parsedDate.toLocaleDateString("en-US", {
-      month: "short", day: "numeric", year: "numeric",
-    });
+    setSuccessMessage("");
+    setErrorMessage("");
   }
 
-  function mapApiIssue(data: {
-    id: string; title: string; category: string; description: string;
-    location: string; priority: Priority; status: IssueStatus; created_at: string;
-  }): Issue {
-    return {
-      id: data.id, title: data.title, category: data.category,
-      description: data.description, location: data.location,
-      priority: data.priority, status: data.status,
-      date: formatIssueDate(data.created_at),
-    };
-  }
+  // LOGIN SUCCESS
 
-  useEffect(() => {
-    async function loadIssues() {
-      setIsLoading(true);
-      setErrorMessage("");
-      try {
-        const response = await fetch(`${API_BASE_URL}/api/issues`);
-        if (!response.ok) throw new Error(`Failed to load issues (${response.status}).`);
-        const data = await response.json();
-        setAllIssues(data.map(mapApiIssue));
-      } catch (error) {
-        setErrorMessage(error instanceof Error ? error.message : "Unable to connect to the backend.");
-      } finally {
-        setIsLoading(false);
-      }
-    }
-    loadIssues();
-  }, []);
+  function handleLoginSuccess() {
+    const savedToken = localStorage.getItem("access_token");
+    const savedUser = readSavedUser();
 
-  const displayedIssues = [...allIssues].slice(0, 6);
-
-
-
-  const stats = [
-
-    {
-
-      label: "Total Issues",
-
-      value: initialStats.total + newIssueCount,
-
-      change: newIssueCount
-
-        ? `${newIssueCount} added this session`
-
-        : "+12 this week",
-
-      icon: "▤",
-
-      color: "blue",
-
-    },
-
-    {
-
-      label: "Open Issues",
-
-      value: initialStats.open + newIssueCount,
-
-      change: "Awaiting review",
-
-      icon: "◷",
-
-      color: "orange",
-
-    },
-
-    {
-
-      label: "In Progress",
-
-      value: initialStats.inProgress,
-
-      change: "Being worked on",
-
-      icon: "↻",
-
-      color: "purple",
-
-    },
-
-    {
-
-      label: "Resolved",
-
-      value: initialStats.resolved,
-
-      change: "67% resolution rate",
-
-      icon: "✓",
-
-      color: "green",
-
-    },
-
-  ];
-
-
-
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const title = formData.title.trim();
-    const description = formData.description.trim();
-    const location = formData.location.trim();
-
-    if (!title || !description || !location) {
-      setErrorMessage("Please complete all required fields.");
-      setSuccessMessage("");
+    if (!savedToken || !savedUser) {
+      setAuthError("Login information is incomplete. Please try again.");
+      handleLogout();
       return;
     }
 
-    setIsSubmitting(true);
-    setErrorMessage("");
-    setSuccessMessage("");
+    setAuthError("");
+    setCurrentUser(savedUser);
+    setToken(savedToken);
+    setActivePage("dashboard");
+    setIsAuthChecking(true);
+  }
 
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/issues`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title, category: formData.category, description, location, priority: formData.priority }),
-      });
-      const responseData = await response.json();
-      if (!response.ok) {
-        const detail = typeof responseData.detail === "string" ? responseData.detail : "Please check your information and try again.";
-        throw new Error(detail);
+  // REGISTRATION SUCCESS
+
+  function handleRegisterSuccess() {
+    setAuthPage("login");
+  }
+
+  // LOAD ISSUES
+
+  async function refreshIssues(): Promise<void> {
+    const savedToken = localStorage.getItem("access_token");
+
+    if (!savedToken) {
+      setIssues([]);
+      return;
+    }
+
+    const response = await fetch(
+      `${API_BASE_URL}/api/issues/`,
+      {
+        headers: {
+          Authorization: `Bearer ${savedToken}`,
+        },
+      }
+    );
+
+    if (response.status === 401) {
+      handleLogout();
+      throw new Error("Your session has expired. Please log in again.");
+    }
+
+    const data = await response.json().catch(() => []);
+
+    if (!response.ok) {
+      throw new Error(data.detail || "Unable to load issues.");
+    }
+
+    if (!Array.isArray(data)) {
+      throw new Error("Unexpected issues response from the server.");
+    }
+
+    setIssues(mapApiIssues(data));
+  }
+
+  // LOAD STAFF USERS
+
+  async function refreshStaffUsers(): Promise<void> {
+    if (!token || userRole !== "Admin") {
+      setStaffUsers([]);
+      return;
+    }
+
+    const response = await fetch(
+      `${API_BASE_URL}/api/admin/users/`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      }
+    );
+
+    const data = await response.json().catch(() => []);
+
+    if (response.status === 401) {
+      handleLogout();
+      throw new Error("Your session has expired. Please log in again.");
+    }
+
+    if (!response.ok) {
+      throw new Error(
+        data.detail || "Unable to load staff users."
+      );
+    }
+
+    if (!Array.isArray(data)) {
+      throw new Error("Unexpected staff response from the server.");
+    }
+
+    setStaffUsers(
+      data.filter(
+        (user: User) => user.role === "Staff"
+      )
+    );
+  }
+
+  // VERIFY SESSION AND LOAD DATA
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function initializeApplication() {
+      if (!token) {
+        setIssues([]);
+        setStaffUsers([]);
+        setIsAuthChecking(false);
+        return;
       }
 
-      const newIssue = mapApiIssue(responseData);
-      setAllIssues((current) => [newIssue, ...current.filter((issue) => issue.id !== newIssue.id)]);
-      setNewIssueCount((count) => count + 1);
-      setSuccessMessage(`Issue ${newIssue.id} — "${newIssue.title}" was submitted successfully.`);
-      setFormData(emptyForm);
-      setSelectedIssue(null);
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Unable to submit the issue. Please try again.");
-    } finally {
-      setIsSubmitting(false);
-    }
-  }
+      setIsAuthChecking(true);
+      setIsLoading(true);
+      setAuthError("");
 
-  function handleReset() {
-    setFormData(emptyForm);
+      try {
+        const response = await fetch(
+          `${API_BASE_URL}/api/issues/`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          }
+        );
+
+        if (cancelled) return;
+
+        if (response.status === 401) {
+          handleLogout();
+          return;
+        }
+
+        const data = await response.json().catch(() => []);
+
+        if (!response.ok) {
+          throw new Error(
+            data.detail || "Unable to verify your session."
+          );
+        }
+
+        if (!Array.isArray(data)) {
+          throw new Error("Unexpected response from the server.");
+        }
+
+        if (!cancelled) {
+          setIssues(mapApiIssues(data));
+        }
+
+        if (userRole === "Admin") {
+          const staffResponse = await fetch(
+            `${API_BASE_URL}/api/admin/users/`,
+            {
+              headers: {
+                Authorization: `Bearer ${token}`,
+              },
+            }
+          );
+
+          const staffData = await staffResponse.json().catch(() => []);
+
+          if (!staffResponse.ok) {
+            throw new Error(
+              staffData.detail || "Unable to load staff users."
+            );
+          }
+
+          if (!Array.isArray(staffData)) {
+            throw new Error("Unexpected staff response from the server.");
+          }
+
+          if (!cancelled) {
+            setStaffUsers(
+              staffData.filter(
+                (user: User) => user.role === "Staff"
+              )
+            );
+          }
+        } else {
+          setStaffUsers([]);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setAuthError(
+            error instanceof Error
+              ? error.message
+              : "Unable to connect to the backend."
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoading(false);
+          setIsAuthChecking(false);
+        }
+      }
+    }
+
+    void initializeApplication();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [token, userRole]);
+
+  // NAVIGATION
+
+  function handleNavigate(page: ActivePage) {
+    setActivePage(page);
     setSuccessMessage("");
     setErrorMessage("");
   }
 
+  // UPDATE ISSUE STATUS
 
+  async function handleStatusChange(
+    issueId: string,
+    status: IssueStatus
+  ): Promise<void> {
+    if (!token || userRole !== "Staff") {
+      throw new Error("You are not authorized to update this issue.");
+    }
+
+    if (status === "Open") return;
+
+    setErrorMessage("");
+    setSuccessMessage("");
+
+    const response = await fetch(
+      `${API_BASE_URL}/api/issues/${issueId}/status`,
+      {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ status }),
+      }
+    );
+
+    const data = await response.json().catch(() => ({}));
+
+    if (response.status === 401) {
+      handleLogout();
+      throw new Error("Your session has expired.");
+    }
+
+    if (!response.ok) {
+      throw new Error(
+        data.detail || "Unable to update issue status."
+      );
+    }
+
+    await refreshIssues();
+
+    setSuccessMessage(`Issue status updated to ${status}.`);
+  }
+
+  // DELETE ISSUE
+
+  async function handleDeleteIssue(issueId: string): Promise<void> {
+    if (!token || userRole !== "Reporter") {
+      throw new Error("You are not authorized to delete this issue.");
+    }
+
+    const response = await fetch(
+      `${API_BASE_URL}/api/issues/${issueId}`,
+      {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      }
+    );
+
+    const data = await response.json().catch(() => ({}));
+
+    if (response.status === 401) {
+      handleLogout();
+      throw new Error("Your session has expired.");
+    }
+
+    if (!response.ok) {
+      throw new Error(
+        data.detail || "Unable to delete issue."
+      );
+    }
+
+    await refreshIssues();
+
+    setSuccessMessage("Issue deleted successfully.");
+  }
+
+  // ASSIGN ISSUE TO STAFF
+
+  async function handleAssignIssue(
+    issueId: string,
+    staffId: string
+  ): Promise<void> {
+    if (!token || userRole !== "Admin") {
+      throw new Error("Only Admin can assign issues.");
+    }
+
+    if (!staffId) {
+      throw new Error("Please select a staff member.");
+    }
+
+    const response = await fetch(
+      `${API_BASE_URL}/api/admin/issues/${issueId}/assign`,
+      {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          staff_id: staffId,
+        }),
+      }
+    );
+
+    const data = await response.json().catch(() => ({}));
+
+    if (response.status === 401) {
+      handleLogout();
+      throw new Error("Your session has expired.");
+    }
+
+    if (!response.ok) {
+      throw new Error(
+        data.detail || "Unable to assign this issue."
+      );
+    }
+
+    await refreshIssues();
+
+    setSuccessMessage("Issue assigned to staff successfully.");
+  }
+
+  // EDIT ISSUE NAVIGATION
+
+  function handleEditIssue(issue: Issue) {
+    setActivePage("all-issues");
+    setSuccessMessage(
+      `Find "${issue.title}" in All Issues to edit it.`
+    );
+  }
+
+  // PAGE INFORMATION
+
+  const pageTitles: Record<ActivePage, string> = {
+    dashboard:
+      userRole === "Reporter"
+        ? "Reporter Dashboard"
+        : userRole === "Staff"
+          ? "Staff Dashboard"
+          : "Admin Dashboard",
+
+    "all-issues": "All Issues",
+    "submit-issue": "Submit an Issue",
+    "user-management": "User Management",
+  };
+
+  const pageSubtitles: Record<ActivePage, string> = {
+    dashboard: "Your SIRRS workspace overview.",
+    "all-issues": "Review and manage reported issues.",
+    "submit-issue": "Submit a new issue for review.",
+    "user-management": "Manage system users and their roles.",
+  };
+
+  // AUTHENTICATION LOADING
+
+  if (isAuthChecking) {
+    return (
+      <div className="loading-state">
+        Verifying your session...
+      </div>
+    );
+  }
+
+  // AUTHENTICATION ERROR
+
+  if (token && authError) {
+    return (
+      <div className="login-container">
+        <div className="login-form">
+          <h2>Unable to verify your session</h2>
+          <p>{authError}</p>
+
+          <button
+            className="primary-button"
+            type="button"
+            onClick={handleLogout}
+          >
+            Return to Login
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // LOGIN AND REGISTER
+
+  if (!token) {
+    if (authPage === "register") {
+      return (
+        <Register
+          onSuccess={handleRegisterSuccess}
+          onLoginClick={() => setAuthPage("login")}
+        />
+      );
+    }
+
+    return (
+      <Login
+        onSuccess={handleLoginSuccess}
+        onRegisterClick={() => setAuthPage("register")}
+      />
+    );
+  }
+
+  // VALIDATE USER
+
+  if (
+    !currentUser ||
+    !userRole ||
+    !["Reporter", "Staff", "Admin"].includes(userRole)
+  ) {
+    return (
+      <div className="login-container">
+        <div className="login-form">
+          <h2>Account information unavailable</h2>
+
+          <p>
+            Please log in again to refresh your account information.
+          </p>
+
+          <button
+            className="primary-button"
+            type="button"
+            onClick={handleLogout}
+          >
+            Return to Login
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ROLE PERMISSIONS
+
+  const allowedPages: ActivePage[] = [
+    "dashboard",
+    "all-issues",
+  ];
+
+  if (userRole === "Reporter") {
+    allowedPages.push("submit-issue");
+  }
+
+  if (userRole === "Admin") {
+    allowedPages.push("user-management");
+  }
+
+  // MAIN APPLICATION
 
   return (
-
     <div className="app-shell">
-
-      <aside className="sidebar">
-
-        <a className="brand" href="#dashboard" aria-label="SIRRS home">
-
-          <span className="brand-mark">S</span>
-
-          <span className="brand-copy">
-
-            <strong>SIRRS</strong>
-
-            <small>Issue Resolution System</small>
-
-          </span>
-
-        </a>
-
-
-
-        <div className="sidebar-label">WORKSPACE</div>
-
-
-
-        <nav className="sidebar-nav" aria-label="Main navigation">
-
-          <a className="nav-link active" href="#dashboard">
-
-            <span className="nav-icon">▦</span>
-
-            Dashboard
-
-          </a>
-
-          <a className="nav-link" href="#issues">
-
-            <span className="nav-icon">▤</span>
-
-            All Issues
-
-            <span className="nav-count">{initialStats.open + newIssueCount}</span>
-
-          </a>
-
-          <a className="nav-link" href="#my-reports">
-
-            <span className="nav-icon">♧</span>
-
-            My Reports
-
-          </a>
-
-          <a className="nav-link" href="#assigned">
-
-            <span className="nav-icon">☑</span>
-
-            Assigned to Me
-
-          </a>
-
-        </nav>
-
-
-
-        <div className="sidebar-label management-label">MANAGEMENT</div>
-
-
-
-        <nav className="sidebar-nav" aria-label="Management navigation">
-
-          <a className="nav-link" href="#analytics">
-
-            <span className="nav-icon">▥</span>
-
-            Analytics
-
-          </a>
-
-          <a className="nav-link" href="#settings">
-
-            <span className="nav-icon">⚙</span>
-
-            Settings
-
-          </a>
-
-        </nav>
-
-
-
-        <div className="sidebar-bottom">
-
-          <div className="help-card">
-
-            <div className="help-icon">?</div>
-
-            <strong>Need assistance?</strong>
-
-            <p>Learn how to report and track an issue.</p>
-
-            <a href="#report-issue">
-
-              Report an issue <span>↗</span>
-
-            </a>
-
-          </div>
-
-
-
-          <div className="sidebar-profile">
-
-            <div className="avatar">SA</div>
-
-            <div className="profile-copy">
-
-              <strong>SIRRS User</strong>
-
-              <small>Demo account</small>
-
-            </div>
-
-            <button
-
-              className="more-button"
-
-              type="button"
-
-              aria-label="More account options"
-
-              title="Demo account"
-
-            >
-
-              ⋯
-
-            </button>
-
-          </div>
-
-        </div>
-
-      </aside>
-
-
-
-      <main className="main-content" id="dashboard">
-
-        <header className="topbar">
-
-          <div className="breadcrumb">
-
-            Workspace <span>/</span> <strong>Dashboard</strong>
-
-          </div>
-
-
-
-          <div className="topbar-actions">
-
-            <span className="system-status">
-
-              <span className="online-dot" />
-
-              Demo mode
-
-            </span>
-
-
-
-            <button
-
-              className="icon-button notification-button"
-
-              type="button"
-
-              aria-label="Notifications"
-
-              title="Notifications"
-
-              onClick={() =>
-
-                window.alert("Notifications will be available in a later step.")
-
-              }
-
-            >
-
-              ♧
-
-            </button>
-
-
-
-            <div className="topbar-divider" />
-
-            <div className="topbar-date">Monday, October 12, 2026</div>
-
-          </div>
-
-        </header>
-
-
+      <Sidebar
+        role={userRole}
+        activePage={activePage}
+        onNavigate={handleNavigate}
+      />
+
+      <main className="main-content">
+        <Header
+          title={pageTitles[activePage]}
+          subtitle={pageSubtitles[activePage]}
+          user={currentUser}
+          onLogout={handleLogout}
+        />
 
         <section className="page-content">
-
-          <div className="welcome-row">
-
-            <div>
-
-              <div className="eyebrow">OVERVIEW</div>
-
-              <h1>Dashboard</h1>
-
-              <p className="page-description">
-
-                Monitor issues, track progress, and keep everything running
-
-                smoothly.
-
-              </p>
-
+          {successMessage && (
+            <div className="success-message dashboard-message">
+              {successMessage}
             </div>
-
-
-
-            <a className="primary-button" href="#report-issue">
-
-              <span>＋</span> Report an Issue
-
-            </a>
-
-          </div>
-
-
-
-          <section className="stats-grid" aria-label="Issue statistics">
-
-            {stats.map((stat) => (
-
-              <article className="stat-card" key={stat.label}>
-
-                <div className="stat-top">
-
-                  <span className="stat-label">{stat.label}</span>
-
-                  <span className={`stat-icon ${stat.color}`}>
-
-                    {stat.icon}
-
-                  </span>
-
-                </div>
-
-                <div className="stat-value">{stat.value}</div>
-
-                <div className="stat-footer">{stat.change}</div>
-
-              </article>
-
-            ))}
-
-          </section>
-
-
-
-          <section className="dashboard-grid">
-
-            <article className="panel recent-panel" id="issues">
-
-              <div className="panel-header">
-
-                <div>
-
-                  <h2>Recent Issues</h2>
-
-                  <p>A quick look at the latest reported issues.</p>
-
-                </div>
-
-                <a className="text-link" href="#report-issue">
-
-                  Report new <span>→</span>
-
-                </a>
-
-              </div>
-
-
-
-              <div className="table-wrap">
-
-                <table className="issues-table">
-
-                  <thead>
-
-                    <tr>
-
-                      <th>ISSUE</th>
-
-                      <th>PRIORITY</th>
-
-                      <th>STATUS</th>
-
-                      <th>REPORTED</th>
-
-                    </tr>
-
-                  </thead>
-
-                  <tbody>
-
-                    {isLoading ? (
-                      <tr><td colSpan={4}>Loading issues...</td></tr>
-                    ) : displayedIssues.length === 0 ? (
-                      <tr><td colSpan={4}>No issues found.</td></tr>
-                    ) : displayedIssues.map((issue) => (
-
-                      <tr key={issue.id}>
-
-                        <td>
-
-                          <button
-
-                            className="issue-title issue-title-button"
-
-                            type="button"
-
-                            onClick={() => setSelectedIssue(issue)}
-
-                          >
-
-                            {issue.title}
-
-                          </button>
-
-                          <div className="issue-meta">
-
-                            {issue.id} <span>·</span> {issue.location}
-
-                          </div>
-
-                        </td>
-
-                        <td>
-
-                          <span
-
-                            className={`priority ${issue.priority.toLowerCase()}`}
-
-                          >
-
-                            <span className="priority-dot" />
-
-                            {issue.priority}
-
-                          </span>
-
-                        </td>
-
-                        <td>
-
-                          <span
-
-                            className={`status ${issue.status
-
-                              .toLowerCase()
-
-                              .replace(" ", "-")}`}
-
-                          >
-
-                            {issue.status}
-
-                          </span>
-
-                        </td>
-
-                        <td className="date-cell">{issue.date}</td>
-
-                      </tr>
-
-                    ))}
-
-                  </tbody>
-
-                </table>
-
-              </div>
-
-
-
-              <div className="panel-footer">
-
-                <span>
-
-                  Showing {displayedIssues.length} recent issues
-
-                </span>
-
-                <a href="#report-issue">Report another issue →</a>
-
-              </div>
-
-            </article>
-
-
-
-            <article className="panel workflow-panel">
-
-              <div className="panel-header">
-
-                <div>
-
-                  <h2>Issue Overview</h2>
-
-                  <p>Current resolution progress.</p>
-
-                </div>
-
-              </div>
-
-
-
-              <div className="resolution-summary">
-
-                <div className="resolution-number">
-
-                  {Math.round(
-
-                    ((initialStats.resolved) /
-
-                      (initialStats.total + newIssueCount)) *
-
-                      100
-
-                  )}
-
-                  %
-
-                </div>
-
-                <div className="resolution-caption">Resolution rate</div>
-
-                <div className="progress-track">
-
-                  <div
-
-                    className="progress-fill"
-
-                    style={{
-
-                      width: `${
-
-                        (initialStats.resolved /
-
-                          (initialStats.total + newIssueCount)) *
-
-                        100
-
-                      }%`,
-
-                    }}
-
-                  />
-
-                </div>
-
-                <div className="progress-labels">
-
-                  <span>{initialStats.resolved} resolved</span>
-
-                  <span>{initialStats.total + newIssueCount} total</span>
-
-                </div>
-
-              </div>
-
-
-
-              <div className="overview-divider" />
-
-
-
-              <div className="status-breakdown">
-
-                <div className="breakdown-row">
-
-                  <span className="breakdown-dot open-dot" />
-
-                  <span>Open</span>
-
-                  <strong>{initialStats.open + newIssueCount}</strong>
-
-                </div>
-
-                <div className="breakdown-row">
-
-                  <span className="breakdown-dot progress-dot" />
-
-                  <span>In Progress</span>
-
-                  <strong>{initialStats.inProgress}</strong>
-
-                </div>
-
-                <div className="breakdown-row">
-
-                  <span className="breakdown-dot resolved-dot" />
-
-                  <span>Resolved</span>
-
-                  <strong>{initialStats.resolved}</strong>
-
-                </div>
-
-              </div>
-
-            </article>
-
-          </section>
-
-
-
-          <section className="panel categories-panel" id="categories">
-
-            <div className="panel-header">
-
-              <div>
-
-                <h2>Browse by Category</h2>
-
-                <p>Common areas where issues are reported.</p>
-
-              </div>
-
-              <a className="text-link" href="#report-issue">
-
-                Report an issue <span>→</span>
-
-              </a>
-
-            </div>
-
-
-
-            <div className="categories-grid">
-
-              <a className="category-card" href="#report-issue">
-
-                <span className="category-icon category-blue">⌘</span>
-
-                <span className="category-info">
-
-                  <strong>IT & Equipment</strong>
-
-                  <small>32 issues</small>
-
-                </span>
-
-                <span className="category-arrow">↗</span>
-
-              </a>
-
-
-
-              <a className="category-card" href="#report-issue">
-
-                <span className="category-icon category-orange">⚒</span>
-
-                <span className="category-info">
-
-                  <strong>Maintenance</strong>
-
-                  <small>28 issues</small>
-
-                </span>
-
-                <span className="category-arrow">↗</span>
-
-              </a>
-
-
-
-              <a className="category-card" href="#report-issue">
-
-                <span className="category-icon category-purple">⌂</span>
-
-                <span className="category-info">
-
-                  <strong>Facilities</strong>
-
-                  <small>24 issues</small>
-
-                </span>
-
-                <span className="category-arrow">↗</span>
-
-              </a>
-
-
-
-              <a className="category-card" href="#report-issue">
-
-                <span className="category-icon category-green">♡</span>
-
-                <span className="category-info">
-
-                  <strong>Safety & Security</strong>
-
-                  <small>18 issues</small>
-
-                </span>
-
-                <span className="category-arrow">↗</span>
-
-              </a>
-
-            </div>
-
-          </section>
-
-
-
-          <section className="panel report-panel" id="report-issue">
-
-            <div className="panel-header">
-
-              <div>
-
-                <h2>Report a New Issue</h2>
-
-                <p>
-
-                  Provide the details below so the appropriate team can review
-
-                  it.
-
-                </p>
-
-              </div>
-
-              <span className="form-required-note">* Required fields</span>
-
-            </div>
-
-
-
-            <form
-
-              className="report-form"
-
-              onSubmit={handleSubmit}
-
-              onReset={handleReset}
-
-            >
-
-              {successMessage && (
-
-                <div className="success-message" role="status">
-
-                  <span>✓</span> {successMessage}
-
-                </div>
-
-              )}
-              {errorMessage && (<div className="error-message" role="alert">{errorMessage}</div>)}
-
-
-
-              <div className="form-grid">
-
-                <div className="form-field">
-
-                  <label htmlFor="issue-title">Issue title *</label>
-
-                  <input
-
-                    id="issue-title"
-
-                    name="title"
-
-                    type="text"
-
-                    placeholder="e.g. Projector not working"
-
-                    value={formData.title}
-
-                    onChange={(event) =>
-
-                      setFormData({
-
-                        ...formData,
-
-                        title: event.target.value,
-
-                      })
-
-                    }
-
-                    maxLength={120}
-
-                    required
-
-                  />
-
-                </div>
-
-
-
-                <div className="form-field">
-
-                  <label htmlFor="issue-category">Category *</label>
-
-                  <select
-
-                    id="issue-category"
-
-                    name="category"
-
-                    value={formData.category}
-
-                    onChange={(event) =>
-
-                      setFormData({
-
-                        ...formData,
-
-                        category: event.target.value,
-
-                      })
-
-                    }
-
-                    required
-
-                  >
-
-                    <option>IT & Equipment</option>
-
-                    <option>Maintenance</option>
-
-                    <option>Facilities</option>
-
-                    <option>Safety & Security</option>
-
-                    <option>Plumbing</option>
-
-                    <option>Other</option>
-
-                  </select>
-
-                </div>
-
-
-
-                <div className="form-field form-field-full">
-
-                  <label htmlFor="issue-description">Description *</label>
-
-                  <textarea
-
-                    id="issue-description"
-
-                    name="description"
-
-                    placeholder="Explain what happened and include useful details..."
-
-                    value={formData.description}
-
-                    onChange={(event) =>
-
-                      setFormData({
-
-                        ...formData,
-
-                        description: event.target.value,
-
-                      })
-
-                    }
-
-                    rows={4}
-
-                    maxLength={2000}
-
-                    required
-
-                  />
-
-                </div>
-
-
-
-                <div className="form-field">
-
-                  <label htmlFor="issue-location">Location *</label>
-
-                  <input
-
-                    id="issue-location"
-
-                    name="location"
-
-                    type="text"
-
-                    placeholder="e.g. Building A, Room 302"
-
-                    value={formData.location}
-
-                    onChange={(event) =>
-
-                      setFormData({
-
-                        ...formData,
-
-                        location: event.target.value,
-
-                      })
-
-                    }
-
-                    maxLength={200}
-
-                    required
-
-                  />
-
-                </div>
-
-
-
-                <div className="form-field">
-
-                  <label htmlFor="issue-priority">Priority *</label>
-
-                  <select
-
-                    id="issue-priority"
-
-                    name="priority"
-
-                    value={formData.priority}
-
-                    onChange={(event) =>
-
-                      setFormData({
-
-                        ...formData,
-
-                        priority: event.target.value as Priority,
-
-                      })
-
-                    }
-
-                    required
-
-                  >
-
-                    <option value="Low">Low</option>
-
-                    <option value="Medium">Medium</option>
-
-                    <option value="High">High</option>
-
-                  </select>
-
-                </div>
-
-
-
-                <div className="form-field form-field-full">
-
-                  <label htmlFor="issue-attachment">
-
-                    Attachment (optional)
-
-                  </label>
-
-                  <input
-
-                    id="issue-attachment"
-
-                    name="attachment"
-
-                    type="file"
-
-                    accept="image/*,.pdf"
-
-                  />
-
-                  <small className="field-help">
-
-                    Image and PDF selection is available. File uploading and
-
-                    storage will be implemented with the backend.
-
-                  </small>
-
-                </div>
-
-              </div>
-
-
-
-              <div className="form-actions">
-
-                <button className="secondary-button" type="reset">
-
-                  Reset form
-
-                </button>
-
-                <button className="primary-button" type="submit" disabled={isSubmitting}>
-                  {isSubmitting ? "Submitting..." : "Submit Issue →"}
-                </button>
-
-              </div>
-
-            </form>
-
-          </section>
-
-
-
-          {selectedIssue && (
-
-            <div
-
-              className="modal-backdrop"
-
-              role="presentation"
-
-              onClick={() => setSelectedIssue(null)}
-
-            >
-
-              <section
-
-                className="issue-modal"
-
-                role="dialog"
-
-                aria-modal="true"
-
-                aria-labelledby="issue-modal-title"
-
-                onClick={(event) => event.stopPropagation()}
-
-              >
-
-                <div className="modal-heading">
-
-                  <div>
-
-                    <span className="modal-issue-id">{selectedIssue.id}</span>
-
-                    <h2 id="issue-modal-title">{selectedIssue.title}</h2>
-
-                  </div>
-
-                  <button
-
-                    className="modal-close"
-
-                    type="button"
-
-                    aria-label="Close issue details"
-
-                    onClick={() => setSelectedIssue(null)}
-
-                  >
-
-                    ×
-
-                  </button>
-
-                </div>
-
-
-
-                <div className="modal-details">
-
-                  <div>
-
-                    <span>Category</span>
-
-                    <strong>{selectedIssue.category}</strong>
-
-                  </div>
-
-                  <div>
-
-                    <span>Location</span>
-
-                    <strong>{selectedIssue.location}</strong>
-
-                  </div>
-
-                  <div>
-
-                    <span>Priority</span>
-
-                    <strong>{selectedIssue.priority}</strong>
-
-                  </div>
-
-                  <div>
-
-                    <span>Status</span>
-
-                    <strong>{selectedIssue.status}</strong>
-
-                  </div>
-
-                  <div>
-
-                    <span>Reported</span>
-
-                    <strong>{selectedIssue.date}</strong>
-
-                  </div>
-
-                </div>
-
-
-
-                <div className="modal-description">
-
-                  <h3>Description</h3>
-
-                  <p>{selectedIssue.description}</p>
-
-                </div>
-
-
-
-                <button
-
-                  className="primary-button modal-done"
-
-                  type="button"
-
-                  onClick={() => setSelectedIssue(null)}
-
-                >
-
-                  Close details
-
-                </button>
-
-              </section>
-
-            </div>
-
           )}
 
+          {errorMessage && (
+            <div className="error-message dashboard-message">
+              {errorMessage}
+            </div>
+          )}
 
+          {activePage === "dashboard" && (
+            <DashboardPage
+              role={userRole}
+              userName={currentUser.name}
+              currentUserId={currentUser.user_id}
+              issues={issues}
+              onNavigateToIssues={() =>
+                handleNavigate("all-issues")
+              }
+              onEditIssue={handleEditIssue}
+              onDeleteIssue={handleDeleteIssue}
+              onStatusChange={handleStatusChange}
+            />
+          )}
+
+          {activePage === "all-issues" && (
+            <AllIssuesPage
+              token={token}
+              role={userRole}
+              currentUserId={currentUser.user_id}
+              issues={issues}
+              staffUsers={staffUsers}
+              onAssignIssue={handleAssignIssue}
+              onRefresh={refreshIssues}
+            />
+          )}
+
+          {activePage === "submit-issue" &&
+            userRole === "Reporter" && (
+              <SubmitIssuePage
+                token={token}
+                onCreated={async () => {
+                  await refreshIssues();
+                  setSuccessMessage(
+                    "Your issue has been submitted successfully."
+                  );
+                  setActivePage("all-issues");
+                }}
+                onCancel={() => handleNavigate("dashboard")}
+              />
+            )}
+
+          {activePage === "user-management" &&
+            userRole === "Admin" && (
+              <UserManagementPage />
+            )}
 
           <footer className="page-footer">
-
-            <span>
-
-              © 2026 SIRRS · Smart Issue Reporting and Resolution System
-
-            </span>
-
-            <span>Built for better issue management.</span>
-
+            © 2026 SIRRS · Smart Issue Reporting and Resolution System
           </footer>
-
         </section>
-
       </main>
-
     </div>
-
   );
-
 }
-
-
 
 export default App;
